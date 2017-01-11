@@ -14,10 +14,38 @@ import os
 import time
 import uuid
 from zipfile import ZipFile
+import asyncio
 
 import click
-import grequests
 from robobrowser import RoboBrowser
+import uvloop
+import aiohttp
+
+
+async def download_img(link, path):
+    print("downloading -> {}".format(link))
+    r = await aiohttp.request('GET', link)
+    image = await r.read()
+
+    # saving
+    if r.status == 200:
+        id_ = str(uuid.uuid4()).replace('-', '')
+        filename = os.path.join(path, 'image_{}.jpg'.format(id_))
+        with open(filename, 'wb') as im:
+            im.write(image)
+        return filename
+    return False
+
+
+def download_images(links, path):
+    loop = uvloop.new_event_loop()
+    asyncio.set_event_loop(loop)
+    futures = [download_img(link, path) for link in links]
+    task = asyncio.wait(futures)
+    done, _ = loop.run_until_complete(task)
+    loop.close()
+    images = [i.result() for i in done]
+    return images
 
 
 @click.command()
@@ -27,7 +55,6 @@ def main(username, path):
     t0 = time.time()
     fotolog_url = 'http://www.fotolog.com/{}/mosaic/'.format(username)
     per_page = 30
-    saved_images = []
     all_links = []
 
     browser = RoboBrowser(history=True, parser='html.parser')
@@ -53,7 +80,8 @@ def main(username, path):
         for link in links:
             browser.follow_link(link)
             try:
-                img = browser.find('a', class_='wall_img_container_big').next_element
+                img = browser.find('a',
+                        class_='wall_img_container_big').next_element
             except:
                 click.echo('img not found, skipping')
                 continue
@@ -68,37 +96,27 @@ def main(username, path):
         browser.open(new_page_url)
         links = browser.find_all('a', class_='wall_img_container')
 
-    requests = (grequests.get(u, stream=True) for u in all_links)
-    responses = grequests.imap(requests, size=1000)
-    saved = 0
-    errors = 0
-    for r in responses:
-        if r.status_code == 200:
-            id_ = str(uuid.uuid4()).replace('-', '')
-            filename = os.path.join(path, 'image_{}.jpg'.format(id_ ))
-            with open(filename, 'wb') as im:
-                for chunk in r.iter_content(1024):
-                    im.write(chunk)
-            saved += 1
-            saved_images.append(filename)
-        else:
-            errors += 1
+    saved_images = download_images(all_links, path)
+    errors = len(list(filter(lambda x: x is False, saved_images)))
 
     # zip all the things
+    saved = 0
     zip_file = os.path.join(path, '{}_photos.zip'.format(username))
     with ZipFile(zip_file, 'w') as z:
         for s in saved_images:
+            if not s:
+                continue
             z.write(s)
             os.remove(os.path.join(path, s))
-
+            saved += 1
     t1 = time.time()
-    print click.secho("""
+    print(click.secho("""
 Images saved..
 {} Images saved.
 {} Images couldn't be downloaded.
 
 Execution time: {:.2f} seconds
-""".format(saved, errors, (t1 - t0)), fg='green', bold=True)
+""".format(saved, 0, (t1 - t0)), fg='green', bold=True))
 
 if __name__ == "__main__":
     main()

@@ -2,6 +2,9 @@ Fotolog Downloader
 ==================
 
 Easily grab your fotolog.com pics
+Python 3 and asyncio powered :heart:
+
+There is an old python 2 version on the `py2` branch. Feel free to use it as well.
 
 
 # Script usage
